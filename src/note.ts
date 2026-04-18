@@ -19,6 +19,35 @@ const cssAttachmentWhitelist: { [key: string]: string[] } = {
   svg: ['image/svg+xml']
 }
 
+const shareNoteTocCss = `
+.share-note-layout{display:block;}
+.share-note-sidebar{margin:0 0 1.5rem;}
+.share-note-content{min-width:0;}
+.share-note-toc{position:relative;width:100%;padding:1rem;border:1px solid var(--background-modifier-border);border-radius:16px;background:var(--background-secondary);box-shadow:0 12px 30px rgba(15,23,42,.08);backdrop-filter:blur(10px);}
+.share-note-toc-title{margin:0 0 .85rem;font-size:.72rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--text-muted);}
+.share-note-toc-list,.share-note-toc-children{margin:0;padding:0;list-style:none;}
+.share-note-toc-list{display:flex;flex-direction:column;gap:.25rem;}
+.share-note-toc-item{display:block;}
+.share-note-toc-link{display:flex;align-items:center;gap:.7rem;padding:.45rem .55rem;border-radius:.8rem;color:inherit;text-decoration:none;transition:background-color 180ms ease,color 180ms ease,transform 180ms ease;}
+.share-note-toc-link:hover{color:var(--text-accent);background:var(--background-primary-alt);}
+.share-note-toc-link.active{color:var(--text-accent);background:var(--background-primary-alt);}
+.share-note-toc-link.active .share-note-toc-badge{background:var(--text-accent);color:var(--background-primary);}
+.share-note-toc-badge{display:inline-flex;align-items:center;justify-content:center;min-width:1.55rem;height:1.55rem;padding:0 .45rem;border-radius:999px;background:var(--interactive-accent);color:var(--text-on-accent, #fff);font-size:.72rem;font-weight:700;line-height:1;}
+.share-note-toc-text{line-height:1.45;}
+.share-note-toc-text-sub{font-size:.95em;font-weight:600;}
+.share-note-toc-text-leaf{font-size:.84em;color:var(--text-muted);}
+.share-note-toc-children{margin-left:1rem;padding-left:.9rem;border-left:1px dashed var(--background-modifier-border);max-height:0;opacity:0;overflow:hidden;will-change:max-height,opacity;transition:max-height 320ms cubic-bezier(.25,.8,.25,1),opacity 220ms ease-in-out;}
+.share-note-toc-item:hover>.share-note-toc-children,.share-note-toc-item:focus-within>.share-note-toc-children,.share-note-toc-item.open>.share-note-toc-children{max-height:120vh;opacity:1;}
+.share-note-toc-bootstrap{position:absolute;width:0;height:0;opacity:0;pointer-events:none;}
+.share-note-toc-target{scroll-margin-top:1.5rem;}
+@media (min-width: 1080px){
+  .share-note-layout{display:grid;grid-template-columns:minmax(15rem,18rem) minmax(0,1fr);gap:clamp(1.5rem,3vw,2.75rem);align-items:start;}
+  .share-note-sidebar{position:sticky;top:1.5rem;align-self:start;margin:0;}
+}
+`
+
+const shareNoteTocBootstrap = `(function(trigger){var toc=trigger.closest('.share-note-toc');if(!toc||toc.dataset.shareNoteBound==='true')return;toc.dataset.shareNoteBound='true';var links=Array.from(toc.querySelectorAll('[data-toc-slug]'));var itemMap=new Map(Array.from(toc.querySelectorAll('[data-toc-item]')).map(function(item){return [item.getAttribute('data-toc-item')||'',item]}));var targets=links.map(function(link){var slug=link.getAttribute('data-toc-slug')||'';return {slug:slug,link:link,heading:document.getElementById(slug)};}).filter(function(entry){return entry.slug&&entry.heading;});var setActive=function(slug){links.forEach(function(link){var active=link.getAttribute('data-toc-slug')===slug;link.classList.toggle('active',active);if(active){link.setAttribute('aria-current','true');}else{link.removeAttribute('aria-current');}});itemMap.forEach(function(item){item.classList.remove('open');});var current=itemMap.get(slug||'');while(current){current.classList.add('open');current=current.parentElement&&current.parentElement.closest('[data-toc-item]');}};var computeActive=function(){if(!targets.length)return '';var offset=Math.min(window.innerHeight*.22,160);var current=targets[0].slug;for(var i=0;i<targets.length;i++){if(targets[i].heading.getBoundingClientRect().top-offset<=0){current=targets[i].slug;}else{break;}}return current;};var ticking=false;var update=function(){ticking=false;setActive(computeActive());};var schedule=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(update);};window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',schedule,{passive:true});setTimeout(schedule,0);schedule();})(this)`
+
 export interface SharedUrl {
   filename: string
   decryptionKey: string
@@ -38,6 +67,16 @@ export interface Renderer {
   pusherEl: HTMLElement,
   previewEl: HTMLElement,
   sections: PreviewSection[]
+}
+
+interface TocHeading {
+  level: number,
+  text: string,
+  target: string
+}
+
+interface TocNode extends TocHeading {
+  children: TocNode[]
 }
 
 export interface ViewModes extends View {
@@ -230,20 +269,7 @@ export default class Note {
         // This is an Anchor link to a document heading, we need to add custom Javascript
         // to jump to that heading rather than using the normal # link
         try {
-          const heading = href.slice(1).replace(/(['"])/g, '\\$1') // escape the quotes
-          const linkTypes = [
-            `[data-heading="${heading}"]`, // Links to a heading
-            `[id="${heading}"]`,           // Links to a footnote
-          ]
-          linkTypes.forEach(selector => {
-            if (this.contentDom.querySelectorAll(selector)?.[0]) {
-              // Double-escape the double quotes (but leave single quotes single escaped)
-              // It makes sense if you look at the query selector...
-              el.setAttribute('onclick', `document.querySelectorAll('${selector.replace(/"/g, '\\"')}')[0].scrollIntoView(true)`)
-            }
-          })
-          el.removeAttribute('target')
-          el.removeAttribute('href')
+          this.setHeadingAnchorAction(el, href.slice(1))
           continue
         } catch (e) {
           console.error(e)
@@ -268,6 +294,8 @@ export default class Note {
       .split('\n').map(s => s.trim()).filter(Boolean)
       .forEach(selector => this.contentDom.querySelectorAll(selector)
         .forEach(el => el.remove()))
+
+    this.injectTableOfContents()
 
     // Note options
     this.expiration = this.getExpiration()
@@ -623,6 +651,189 @@ export default class Note {
 
   reduceSections (sections: { el: HTMLElement }[]) {
     return sections.reduce((p: string, c) => p + c.el.outerHTML, '')
+  }
+
+  injectTableOfContents () {
+    const headings = this.collectTocHeadings()
+    const tocTree = this.buildTocTree(headings)
+    if (!tocTree.length) return
+
+    const layout = this.contentDom.createElement('div')
+    layout.classList.add('share-note-layout')
+
+    const sidebar = this.contentDom.createElement('aside')
+    sidebar.classList.add('share-note-sidebar')
+
+    const nav = this.contentDom.createElement('nav')
+    nav.classList.add('share-note-toc')
+    nav.setAttribute('aria-label', 'Table of contents')
+
+    const title = this.contentDom.createElement('div')
+    title.classList.add('share-note-toc-title')
+    title.innerText = 'On this page'
+    nav.append(title)
+    nav.append(this.renderTocTree(tocTree))
+
+    const bootstrap = this.contentDom.createElement('img')
+    bootstrap.classList.add('share-note-toc-bootstrap')
+    bootstrap.setAttribute('src', 'data:,')
+    bootstrap.setAttribute('alt', '')
+    bootstrap.setAttribute('aria-hidden', 'true')
+    bootstrap.setAttribute('onload', shareNoteTocBootstrap)
+    nav.append(bootstrap)
+
+    sidebar.append(nav)
+
+    const content = this.contentDom.createElement('div')
+    content.classList.add('share-note-content')
+    Array.from(this.contentDom.body.childNodes).forEach(node => content.append(node))
+
+    layout.append(sidebar, content)
+    this.contentDom.body.append(layout)
+    this.css += shareNoteTocCss
+  }
+
+  collectTocHeadings () {
+    const usedTargets = new Set<string>()
+
+    return Array.from(this.contentDom.body.querySelectorAll<HTMLElement>('h1, h2, h3, h4, h5, h6'))
+      .filter(el => !el.closest('.share-note-toc'))
+      .map(el => {
+        const text = el.innerText.trim()
+        if (!text) return null
+
+        const level = parseInt(el.tagName.slice(1), 10)
+        if (level < 2 || level > 4) return null
+        const existingTarget = el.getAttribute('id') || el.getAttribute('data-heading')
+        const target = existingTarget || this.getUniqueHeadingTarget(text, usedTargets)
+
+        if (!el.getAttribute('data-heading')) {
+          el.setAttribute('data-heading', target)
+        }
+        if (!el.getAttribute('id')) {
+          el.setAttribute('id', target)
+        }
+        el.classList.add('share-note-toc-target')
+        usedTargets.add(target)
+
+        return {
+          level,
+          text,
+          target
+        } as TocHeading
+      })
+      .filter((heading): heading is TocHeading => !!heading)
+  }
+
+  buildTocTree (headings: TocHeading[]) {
+    const tocTree: TocNode[] = []
+    const parents: TocNode[] = []
+
+    headings.forEach(heading => {
+      const node: TocNode = {
+        ...heading,
+        children: []
+      }
+
+      if (node.level === 2) {
+        tocTree.push(node)
+        parents[0] = node
+        parents.length = 1
+        return
+      }
+
+      if (node.level === 3 && parents[0]) {
+        parents[0].children.push(node)
+        parents[1] = node
+        parents.length = 2
+        return
+      }
+
+      if (node.level === 4 && parents[1]) {
+        parents[1].children.push(node)
+        parents[2] = node
+        parents.length = 3
+      }
+    })
+
+    return tocTree
+  }
+
+  renderTocTree (nodes: TocNode[], parents: number[] = []) {
+    const list = this.contentDom.createElement('ul')
+    list.classList.add(parents.length ? 'share-note-toc-children' : 'share-note-toc-list')
+
+    nodes.forEach((node, index) => {
+      const order = [...parents, index + 1]
+      const item = this.contentDom.createElement('li')
+      item.classList.add('share-note-toc-item')
+      item.setAttribute('data-toc-item', node.target)
+
+      const link = this.contentDom.createElement('a')
+      link.classList.add('share-note-toc-link', 'internal-link')
+      link.setAttribute('href', '#' + node.target)
+      link.setAttribute('data-toc-slug', node.target)
+
+      if (node.level === 2) {
+        const badge = this.contentDom.createElement('span')
+        badge.classList.add('share-note-toc-badge')
+        badge.innerText = order[0].toString()
+        link.append(badge)
+      }
+
+      const text = this.contentDom.createElement('span')
+      text.classList.add('share-note-toc-text')
+      if (node.level === 3) {
+        text.classList.add('share-note-toc-text-sub')
+        text.innerText = `${order.join('.')} ${node.text}`
+      } else if (node.level === 4) {
+        text.classList.add('share-note-toc-text-leaf')
+        text.innerText = `${order.join('.')} ${node.text}`
+      } else {
+        text.innerText = node.text
+      }
+      link.append(text)
+
+      this.setHeadingAnchorAction(link, node.target)
+      item.append(link)
+
+      if (node.children.length) {
+        item.append(this.renderTocTree(node.children, order))
+      }
+
+      list.append(item)
+    })
+
+    return list
+  }
+
+  getUniqueHeadingTarget (text: string, usedTargets: Set<string>) {
+    let target = text
+    let suffix = 2
+
+    while (usedTargets.has(target)) {
+      target = `${text}-${suffix++}`
+    }
+
+    return target
+  }
+
+  setHeadingAnchorAction (el: HTMLElement, heading: string) {
+    const escapedHeading = heading.replace(/(['"])/g, '\\$1')
+    const linkTypes = [
+      `[data-heading="${escapedHeading}"]`,
+      `[id="${escapedHeading}"]`,
+    ]
+
+    linkTypes.forEach(selector => {
+      if (this.contentDom.querySelectorAll(selector)?.[0]) {
+        // Double-escape the double quotes (but leave single quotes single escaped)
+        // It makes sense if you look at the query selector...
+        el.setAttribute('onclick', `document.querySelectorAll('${selector.replace(/"/g, '\\"')}')[0].scrollIntoView(true)`)
+      }
+    })
+    el.removeAttribute('target')
+    el.removeAttribute('href')
   }
 
   /**
