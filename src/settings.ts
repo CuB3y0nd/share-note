@@ -13,6 +13,12 @@ export enum TitleSource {
   'Frontmatter property'
 }
 
+export enum MobileTocMode {
+  Hide = 'Hide',
+  Drawer = 'Drawer button',
+  Collapse = 'Top collapsible'
+}
+
 export enum YamlField {
   link,
   updated,
@@ -28,6 +34,7 @@ export interface ShareSettings {
   apiKey: string;
   yamlField: string;
   noteWidth: string;
+  mobileTocMode: MobileTocMode;
   theme: string; // The name of the theme stored on the server
   themeMode: ThemeMode;
   titleSource: TitleSource;
@@ -47,6 +54,7 @@ export const DEFAULT_SETTINGS: ShareSettings = {
   apiKey: '',
   yamlField: 'share',
   noteWidth: '',
+  mobileTocMode: MobileTocMode.Hide,
   theme: '',
   themeMode: ThemeMode['Same as theme'],
   titleSource: TitleSource['Note title'],
@@ -182,6 +190,21 @@ export class ShareSettingsTab extends PluginSettingTab {
           this.plugin.settings.noteWidth = value
           await this.plugin.saveSettings()
         }))
+
+    new Setting(containerEl)
+      .setName('Small-screen TOC mode')
+      .setDesc('Choose how the table of contents behaves on narrow screens. Desktop keeps the floating TOC outside the article width.')
+      .addDropdown(dropdown => {
+        dropdown
+          .addOption(MobileTocMode.Hide, 'Hidden')
+          .addOption(MobileTocMode.Drawer, 'Bottom-right drawer')
+          .addOption(MobileTocMode.Collapse, 'Top collapsible')
+          .setValue(this.plugin.settings.mobileTocMode)
+          .onChange(async (value) => {
+            this.plugin.settings.mobileTocMode = value as MobileTocMode
+            await this.plugin.saveSettings()
+          })
+      })
 
     // Strip frontmatter
     new Setting(containerEl)

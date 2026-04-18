@@ -3,7 +3,7 @@ import { encryptString, sha1 } from './crypto'
 import SharePlugin from './main'
 import StatusMessage, { StatusType } from './StatusMessage'
 import NoteTemplate, { ElementStyle, getElementStyle } from './NoteTemplate'
-import { ThemeMode, TitleSource, YamlField } from './settings'
+import { MobileTocMode, ThemeMode, TitleSource, YamlField } from './settings'
 import { dataUriToBuffer } from 'data-uri-to-buffer'
 import FileTypes from './libraries/FileTypes'
 import { CheckFilesResult, parseExistingShareUrl } from './api'
@@ -20,10 +20,10 @@ const cssAttachmentWhitelist: { [key: string]: string[] } = {
 }
 
 const shareNoteTocCss = `
-.share-note-layout{display:block;}
-.share-note-sidebar{margin:0 0 1.5rem;}
-.share-note-content{min-width:0;}
-.share-note-toc{position:relative;width:100%;padding:1rem;border:1px solid var(--background-modifier-border);border-radius:16px;background:var(--background-secondary);box-shadow:0 12px 30px rgba(15,23,42,.08);backdrop-filter:blur(10px);}
+.share-note-toc-shell{display:none;--share-note-toc-width:clamp(15rem,16vw,18rem);}
+.share-note-toc-mobile-drawer{display:block;}
+.share-note-toc-mobile-collapse{display:block;margin:0 0 1.25rem;}
+.share-note-toc{position:relative;width:var(--share-note-toc-width);max-height:calc(100vh - 3rem);overflow:auto;padding:1rem;border:1px solid var(--background-modifier-border);border-radius:16px;background:color-mix(in srgb, var(--background-secondary) 88%, transparent);box-shadow:0 12px 30px rgba(15,23,42,.08);backdrop-filter:blur(10px);animation:share-note-toc-init 1ms linear;}
 .share-note-toc-title{margin:0 0 .85rem;font-size:.72rem;font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--text-muted);}
 .share-note-toc-list,.share-note-toc-children{margin:0;padding:0;list-style:none;}
 .share-note-toc-list{display:flex;flex-direction:column;gap:.25rem;}
@@ -38,15 +38,31 @@ const shareNoteTocCss = `
 .share-note-toc-text-leaf{font-size:.84em;color:var(--text-muted);}
 .share-note-toc-children{margin-left:1rem;padding-left:.9rem;border-left:1px dashed var(--background-modifier-border);max-height:0;opacity:0;overflow:hidden;will-change:max-height,opacity;transition:max-height 320ms cubic-bezier(.25,.8,.25,1),opacity 220ms ease-in-out;}
 .share-note-toc-item:hover>.share-note-toc-children,.share-note-toc-item:focus-within>.share-note-toc-children,.share-note-toc-item.open>.share-note-toc-children{max-height:120vh;opacity:1;}
-.share-note-toc-bootstrap{position:absolute;width:0;height:0;opacity:0;pointer-events:none;}
+.share-note-toc-mobile-drawer .share-note-toc,.share-note-toc-mobile-collapse .share-note-toc{width:auto;max-height:none;padding:0;border:0;background:transparent;box-shadow:none;backdrop-filter:none;}
+.share-note-toc-mobile-drawer .share-note-toc-title,.share-note-toc-mobile-collapse .share-note-toc-title{display:none;}
+.share-note-toc-mobile-button{position:fixed;right:1rem;bottom:1rem;z-index:31;display:inline-flex;align-items:center;gap:.5rem;padding:.8rem 1rem;border:1px solid var(--background-modifier-border);border-radius:999px;background:var(--background-primary);box-shadow:0 10px 30px rgba(15,23,42,.18);color:inherit;font:inherit;font-size:.95rem;font-weight:600;cursor:pointer;}
+.share-note-toc-mobile-overlay{position:fixed;inset:0;z-index:30;background:rgba(15,23,42,.35);opacity:0;pointer-events:none;transition:opacity 180ms ease;}
+.share-note-toc-mobile-panel{position:fixed;left:1rem;right:1rem;bottom:1rem;z-index:32;max-height:min(70vh,32rem);overflow:auto;padding:1rem;border:1px solid var(--background-modifier-border);border-radius:18px;background:var(--background-primary);box-shadow:0 18px 40px rgba(15,23,42,.24);transform:translateY(1rem);opacity:0;pointer-events:none;transition:transform 220ms ease,opacity 220ms ease;}
+.share-note-toc-mobile-drawer.is-open .share-note-toc-mobile-overlay{opacity:1;pointer-events:auto;}
+.share-note-toc-mobile-drawer.is-open .share-note-toc-mobile-panel{transform:translateY(0);opacity:1;pointer-events:auto;}
+.share-note-toc-mobile-header{display:flex;align-items:center;justify-content:space-between;gap:1rem;margin:0 0 .9rem;}
+.share-note-toc-mobile-heading{font-size:.8rem;font-weight:700;letter-spacing:.16em;text-transform:uppercase;color:var(--text-muted);}
+.share-note-toc-mobile-close{display:inline-flex;align-items:center;justify-content:center;width:2rem;height:2rem;border:0;border-radius:999px;background:var(--background-secondary);color:inherit;font:inherit;font-size:1.15rem;cursor:pointer;}
+.share-note-toc-mobile-collapse{border:1px solid var(--background-modifier-border);border-radius:16px;background:color-mix(in srgb, var(--background-secondary) 82%, transparent);}
+.share-note-toc-mobile-summary{display:flex;align-items:center;justify-content:space-between;gap:1rem;padding:.9rem 1rem;cursor:pointer;list-style:none;color:var(--text-muted);font-size:.84rem;font-weight:700;letter-spacing:.12em;text-transform:uppercase;}
+.share-note-toc-mobile-summary::-webkit-details-marker{display:none;}
+.share-note-toc-mobile-summary::after{content:'+';font-size:1rem;line-height:1;}
+.share-note-toc-mobile-collapse[open] .share-note-toc-mobile-summary::after{content:'-';}
+.share-note-toc-mobile-collapse-content{padding:0 1rem 1rem;}
 .share-note-toc-target{scroll-margin-top:1.5rem;}
-@media (min-width: 1080px){
-  .share-note-layout{display:grid;grid-template-columns:minmax(15rem,18rem) minmax(0,1fr);gap:clamp(1.5rem,3vw,2.75rem);align-items:start;}
-  .share-note-sidebar{position:sticky;top:1.5rem;align-self:start;margin:0;}
+@keyframes share-note-toc-init{from{outline-color:transparent;}to{outline-color:transparent;}}
+@media (min-width: 1400px){
+  .share-note-toc-shell{display:block;position:fixed;top:1.5rem;left:max(1rem,calc(50vw - (var(--file-line-width,42rem) / 2) - var(--share-note-toc-width) - 2rem));z-index:20;}
+  .share-note-toc-mobile-drawer,.share-note-toc-mobile-collapse{display:none;}
 }
 `
 
-const shareNoteTocBootstrap = `(function(trigger){var toc=trigger.closest('.share-note-toc');if(!toc||toc.dataset.shareNoteBound==='true')return;toc.dataset.shareNoteBound='true';var links=Array.from(toc.querySelectorAll('[data-toc-slug]'));var itemMap=new Map(Array.from(toc.querySelectorAll('[data-toc-item]')).map(function(item){return [item.getAttribute('data-toc-item')||'',item]}));var targets=links.map(function(link){var slug=link.getAttribute('data-toc-slug')||'';return {slug:slug,link:link,heading:document.getElementById(slug)};}).filter(function(entry){return entry.slug&&entry.heading;});var setActive=function(slug){links.forEach(function(link){var active=link.getAttribute('data-toc-slug')===slug;link.classList.toggle('active',active);if(active){link.setAttribute('aria-current','true');}else{link.removeAttribute('aria-current');}});itemMap.forEach(function(item){item.classList.remove('open');});var current=itemMap.get(slug||'');while(current){current.classList.add('open');current=current.parentElement&&current.parentElement.closest('[data-toc-item]');}};var computeActive=function(){if(!targets.length)return '';var offset=Math.min(window.innerHeight*.22,160);var current=targets[0].slug;for(var i=0;i<targets.length;i++){if(targets[i].heading.getBoundingClientRect().top-offset<=0){current=targets[i].slug;}else{break;}}return current;};var ticking=false;var update=function(){ticking=false;setActive(computeActive());};var schedule=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(update);};window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',schedule,{passive:true});setTimeout(schedule,0);schedule();})(this)`
+const shareNoteTocBootstrap = `(function(trigger){var toc=trigger.closest('.share-note-toc');if(!toc||toc.dataset.shareNoteBound==='true')return;toc.dataset.shareNoteBound='true';var links=Array.from(toc.querySelectorAll('[data-toc-slug]'));var itemMap=new Map(Array.from(toc.querySelectorAll('[data-toc-item]')).map(function(item){return [item.getAttribute('data-toc-item')||'',item]}));var targets=links.map(function(link){var slug=link.getAttribute('data-toc-slug')||'';return {slug:slug,link:link,heading:document.getElementById(slug)};}).filter(function(entry){return entry.slug&&entry.heading;});var drawer=toc.closest('.share-note-toc-mobile-drawer');if(drawer&&drawer.dataset.shareNoteDrawerBound!=='true'){drawer.dataset.shareNoteDrawerBound='true';var openers=drawer.querySelectorAll('[data-toc-toggle]');var closers=drawer.querySelectorAll('[data-toc-close]');openers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.add('is-open');});});closers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.remove('is-open');});});}var setActive=function(slug){links.forEach(function(link){var active=link.getAttribute('data-toc-slug')===slug;link.classList.toggle('active',active);if(active){link.setAttribute('aria-current','true');}else{link.removeAttribute('aria-current');}});itemMap.forEach(function(item){item.classList.remove('open');});var current=itemMap.get(slug||'');while(current){current.classList.add('open');current=current.parentElement&&current.parentElement.closest('[data-toc-item]');}};var computeActive=function(){if(!targets.length)return '';var offset=Math.min(window.innerHeight*.22,160);var current='';for(var i=0;i<targets.length;i++){if(targets[i].heading.getBoundingClientRect().top-offset<=0){current=targets[i].slug;}else{break;}}return current||targets[0].slug;};links.forEach(function(link){link.addEventListener('click',function(){if(drawer){drawer.classList.remove('is-open');}});});var ticking=false;var update=function(){ticking=false;setActive(computeActive());};var schedule=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(update);};window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',schedule,{passive:true});setTimeout(schedule,0);schedule();})(this)`
 
 export interface SharedUrl {
   filename: string
@@ -658,38 +674,24 @@ export default class Note {
     const tocTree = this.buildTocTree(headings)
     if (!tocTree.length) return
 
-    const layout = this.contentDom.createElement('div')
-    layout.classList.add('share-note-layout')
+    const fragment = this.contentDom.createDocumentFragment()
 
-    const sidebar = this.contentDom.createElement('aside')
-    sidebar.classList.add('share-note-sidebar')
+    const shell = this.contentDom.createElement('aside')
+    shell.classList.add('share-note-toc-shell')
+    shell.append(this.renderTocNav(tocTree))
+    fragment.append(shell)
 
-    const nav = this.contentDom.createElement('nav')
-    nav.classList.add('share-note-toc')
-    nav.setAttribute('aria-label', 'Table of contents')
+    switch (this.plugin.settings.mobileTocMode) {
+      case MobileTocMode.Drawer:
+        fragment.append(this.renderMobileDrawerToc(tocTree))
+        break
 
-    const title = this.contentDom.createElement('div')
-    title.classList.add('share-note-toc-title')
-    title.innerText = 'On this page'
-    nav.append(title)
-    nav.append(this.renderTocTree(tocTree))
+      case MobileTocMode.Collapse:
+        fragment.append(this.renderMobileCollapsibleToc(tocTree))
+        break
+    }
 
-    const bootstrap = this.contentDom.createElement('img')
-    bootstrap.classList.add('share-note-toc-bootstrap')
-    bootstrap.setAttribute('src', 'data:,')
-    bootstrap.setAttribute('alt', '')
-    bootstrap.setAttribute('aria-hidden', 'true')
-    bootstrap.setAttribute('onload', shareNoteTocBootstrap)
-    nav.append(bootstrap)
-
-    sidebar.append(nav)
-
-    const content = this.contentDom.createElement('div')
-    content.classList.add('share-note-content')
-    Array.from(this.contentDom.body.childNodes).forEach(node => content.append(node))
-
-    layout.append(sidebar, content)
-    this.contentDom.body.append(layout)
+    this.contentDom.body.prepend(fragment)
     this.css += shareNoteTocCss
   }
 
@@ -757,6 +759,75 @@ export default class Note {
     })
 
     return tocTree
+  }
+
+  renderTocNav (nodes: TocNode[]) {
+    const nav = this.contentDom.createElement('nav')
+    nav.classList.add('share-note-toc')
+    nav.setAttribute('aria-label', 'Table of contents')
+    nav.setAttribute('onanimationstart', shareNoteTocBootstrap)
+
+    const title = this.contentDom.createElement('div')
+    title.classList.add('share-note-toc-title')
+    title.innerText = 'On this page'
+    nav.append(title)
+    nav.append(this.renderTocTree(nodes))
+
+    return nav
+  }
+
+  renderMobileDrawerToc (nodes: TocNode[]) {
+    const drawer = this.contentDom.createElement('div')
+    drawer.classList.add('share-note-toc-mobile-drawer')
+
+    const button = this.contentDom.createElement('button')
+    button.classList.add('share-note-toc-mobile-button')
+    button.setAttribute('type', 'button')
+    button.setAttribute('data-toc-toggle', 'true')
+    button.innerText = 'Contents'
+
+    const overlay = this.contentDom.createElement('div')
+    overlay.classList.add('share-note-toc-mobile-overlay')
+    overlay.setAttribute('data-toc-close', 'true')
+
+    const panel = this.contentDom.createElement('div')
+    panel.classList.add('share-note-toc-mobile-panel')
+
+    const header = this.contentDom.createElement('div')
+    header.classList.add('share-note-toc-mobile-header')
+
+    const heading = this.contentDom.createElement('div')
+    heading.classList.add('share-note-toc-mobile-heading')
+    heading.innerText = 'On this page'
+
+    const close = this.contentDom.createElement('button')
+    close.classList.add('share-note-toc-mobile-close')
+    close.setAttribute('type', 'button')
+    close.setAttribute('data-toc-close', 'true')
+    close.setAttribute('aria-label', 'Close table of contents')
+    close.innerText = 'x'
+
+    header.append(heading, close)
+    panel.append(header, this.renderTocNav(nodes))
+    drawer.append(button, overlay, panel)
+
+    return drawer
+  }
+
+  renderMobileCollapsibleToc (nodes: TocNode[]) {
+    const details = this.contentDom.createElement('details')
+    details.classList.add('share-note-toc-mobile-collapse')
+
+    const summary = this.contentDom.createElement('summary')
+    summary.classList.add('share-note-toc-mobile-summary')
+    summary.innerText = 'Contents'
+
+    const content = this.contentDom.createElement('div')
+    content.classList.add('share-note-toc-mobile-collapse-content')
+    content.append(this.renderTocNav(nodes))
+
+    details.append(summary, content)
+    return details
   }
 
   renderTocTree (nodes: TocNode[], parents: number[] = []) {
