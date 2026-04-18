@@ -54,6 +54,7 @@ const shareNoteTocCss = `
 .share-note-toc-mobile-summary::after{content:'+';font-size:1rem;line-height:1;}
 .share-note-toc-mobile-collapse[open] .share-note-toc-mobile-summary::after{content:'-';}
 .share-note-toc-mobile-collapse-content{padding:0 1rem 1rem;}
+.share-note-toc-bootstrap{position:absolute;width:0;height:0;opacity:0;pointer-events:none;}
 .share-note-toc-target{scroll-margin-top:1.5rem;}
 @keyframes share-note-toc-init{from{outline-color:transparent;}to{outline-color:transparent;}}
 @media (min-width: 1400px){
@@ -62,7 +63,7 @@ const shareNoteTocCss = `
 }
 `
 
-const shareNoteTocBootstrap = `(function(trigger){var toc=trigger.closest('.share-note-toc');if(!toc||toc.dataset.shareNoteBound==='true')return;toc.dataset.shareNoteBound='true';var links=Array.from(toc.querySelectorAll('[data-toc-slug]'));var itemMap=new Map(Array.from(toc.querySelectorAll('[data-toc-item]')).map(function(item){return [item.getAttribute('data-toc-item')||'',item]}));var targets=links.map(function(link){var slug=link.getAttribute('data-toc-slug')||'';return {slug:slug,link:link,heading:document.getElementById(slug)};}).filter(function(entry){return entry.slug&&entry.heading;});var drawer=toc.closest('.share-note-toc-mobile-drawer');if(drawer&&drawer.dataset.shareNoteDrawerBound!=='true'){drawer.dataset.shareNoteDrawerBound='true';var openers=drawer.querySelectorAll('[data-toc-toggle]');var closers=drawer.querySelectorAll('[data-toc-close]');openers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.add('is-open');});});closers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.remove('is-open');});});}var setActive=function(slug){links.forEach(function(link){var active=link.getAttribute('data-toc-slug')===slug;link.classList.toggle('active',active);if(active){link.setAttribute('aria-current','true');}else{link.removeAttribute('aria-current');}});itemMap.forEach(function(item){item.classList.remove('open');});var current=itemMap.get(slug||'');while(current){current.classList.add('open');current=current.parentElement&&current.parentElement.closest('[data-toc-item]');}};var computeActive=function(){if(!targets.length)return '';var offset=Math.min(window.innerHeight*.22,160);var current='';for(var i=0;i<targets.length;i++){if(targets[i].heading.getBoundingClientRect().top-offset<=0){current=targets[i].slug;}else{break;}}return current||targets[0].slug;};links.forEach(function(link){link.addEventListener('click',function(){if(drawer){drawer.classList.remove('is-open');}});});var ticking=false;var update=function(){ticking=false;setActive(computeActive());};var schedule=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(update);};window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',schedule,{passive:true});setTimeout(schedule,0);schedule();})(this)`
+const shareNoteTocBootstrap = `(function(trigger){var toc=trigger.closest('.share-note-toc');if(!toc||toc.dataset.shareNoteBound==='true')return;toc.dataset.shareNoteBound='true';var links=Array.from(toc.querySelectorAll('[data-toc-slug]'));var itemMap=new Map(Array.from(toc.querySelectorAll('[data-toc-item]')).map(function(item){return [item.getAttribute('data-toc-item')||'',item]}));var targets=links.map(function(link){var slug=link.getAttribute('data-toc-slug')||'';return {slug:slug,link:link,heading:document.getElementById(slug)};}).filter(function(entry){return entry.slug&&entry.heading;});var drawer=toc.closest('.share-note-toc-mobile-drawer');if(drawer&&drawer.dataset.shareNoteDrawerBound!=='true'){drawer.dataset.shareNoteDrawerBound='true';var openers=drawer.querySelectorAll('[data-toc-toggle]');var closers=drawer.querySelectorAll('[data-toc-close]');openers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.add('is-open');});});closers.forEach(function(el){el.addEventListener('click',function(){drawer.classList.remove('is-open');});});}var setActive=function(slug){links.forEach(function(link){var active=link.getAttribute('data-toc-slug')===slug;link.classList.toggle('active',active);if(active){link.setAttribute('aria-current','true');}else{link.removeAttribute('aria-current');}});itemMap.forEach(function(item){item.classList.remove('open');});var current=itemMap.get(slug||'');while(current){current.classList.add('open');current=current.parentElement&&current.parentElement.closest('[data-toc-item]');}};var computeActive=function(){if(!targets.length)return '';var offset=Math.min(window.innerHeight*.22,160);var current='';for(var i=0;i<targets.length;i++){if(targets[i].heading.getBoundingClientRect().top-offset<=0){current=targets[i].slug;}else{break;}}return current||targets[0].slug;};links.forEach(function(link){link.addEventListener('click',function(){if(drawer){drawer.classList.remove('is-open');}});});var ticking=false;var update=function(forceSlug){ticking=false;setActive(forceSlug||computeActive());};var schedule=function(){if(ticking)return;ticking=true;window.requestAnimationFrame(function(){update();});};if('IntersectionObserver'in window){var observer=new IntersectionObserver(function(entries){var visible=entries.filter(function(entry){return entry.isIntersecting;}).sort(function(a,b){return a.boundingClientRect.top-b.boundingClientRect.top;});if(visible[0]&&visible[0].target&&visible[0].target.id){update(visible[0].target.id);}else{schedule();}},{rootMargin:'0px 0px -70% 0px',threshold:[0,1]});targets.forEach(function(entry){observer.observe(entry.heading);});}window.addEventListener('scroll',schedule,{passive:true});window.addEventListener('resize',schedule,{passive:true});setTimeout(schedule,0);schedule();})(this)`
 
 export interface SharedUrl {
   filename: string
@@ -705,7 +706,7 @@ export default class Note {
         if (!text) return null
 
         const level = parseInt(el.tagName.slice(1), 10)
-        if (level < 2 || level > 4) return null
+        if (level > 4) return null
         const existingTarget = el.getAttribute('id') || el.getAttribute('data-heading')
         const target = existingTarget || this.getUniqueHeadingTarget(text, usedTargets)
 
@@ -737,25 +738,17 @@ export default class Note {
         children: []
       }
 
-      if (node.level === 2) {
+      while (parents.length && parents[parents.length - 1].level >= node.level) {
+        parents.pop()
+      }
+
+      if (parents.length) {
+        parents[parents.length - 1].children.push(node)
+      } else {
         tocTree.push(node)
-        parents[0] = node
-        parents.length = 1
-        return
       }
 
-      if (node.level === 3 && parents[0]) {
-        parents[0].children.push(node)
-        parents[1] = node
-        parents.length = 2
-        return
-      }
-
-      if (node.level === 4 && parents[1]) {
-        parents[1].children.push(node)
-        parents[2] = node
-        parents.length = 3
-      }
+      parents.push(node)
     })
 
     return tocTree
@@ -772,6 +765,14 @@ export default class Note {
     title.innerText = 'On this page'
     nav.append(title)
     nav.append(this.renderTocTree(nodes))
+
+    const bootstrap = this.contentDom.createElement('img')
+    bootstrap.classList.add('share-note-toc-bootstrap')
+    bootstrap.setAttribute('src', 'data:image/gif;base64,R0lGODlhAQABAAAAACw=')
+    bootstrap.setAttribute('alt', '')
+    bootstrap.setAttribute('aria-hidden', 'true')
+    bootstrap.setAttribute('onload', shareNoteTocBootstrap)
+    nav.append(bootstrap)
 
     return nav
   }
@@ -836,6 +837,7 @@ export default class Note {
 
     nodes.forEach((node, index) => {
       const order = [...parents, index + 1]
+      const depth = order.length
       const item = this.contentDom.createElement('li')
       item.classList.add('share-note-toc-item')
       item.setAttribute('data-toc-item', node.target)
@@ -845,7 +847,7 @@ export default class Note {
       link.setAttribute('href', '#' + node.target)
       link.setAttribute('data-toc-slug', node.target)
 
-      if (node.level === 2) {
+      if (depth === 1) {
         const badge = this.contentDom.createElement('span')
         badge.classList.add('share-note-toc-badge')
         badge.innerText = order[0].toString()
@@ -854,10 +856,10 @@ export default class Note {
 
       const text = this.contentDom.createElement('span')
       text.classList.add('share-note-toc-text')
-      if (node.level === 3) {
+      if (depth === 2) {
         text.classList.add('share-note-toc-text-sub')
         text.innerText = `${order.join('.')} ${node.text}`
-      } else if (node.level === 4) {
+      } else if (depth >= 3) {
         text.classList.add('share-note-toc-text-leaf')
         text.innerText = `${order.join('.')} ${node.text}`
       } else {
